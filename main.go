@@ -7,8 +7,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"intel/isecl/lib/common/v3/validation"
-	p "intel/isecl/lib/platform-info/v3/platforminfo"
+	"intel/isecl/lib/common/v4/validation"
+	p "intel/isecl/lib/platform-info/v4/platforminfo"
 	"os"
 )
 
