@@ -139,13 +139,13 @@ func OSVersion() (string, error) {
 // osNameandVersion retrieves the host OS name and version
 func osNameAndVersion() (string, string, error) {
 	/*
-		Sample response of 'lsb_release -a'
+	  Sample response of 'lsb_release -a'
 
-		No LSB modules are available.
-		Distributor ID: Ubuntu
-		Description:    Ubuntu 11.10
-		Release:        11.10
-		Codename:       oneiric
+	  No LSB modules are available.
+	  Distributor ID: Ubuntu
+	  Description:    Ubuntu 11.10
+	  Release:        11.10
+	  Codename:       oneiric
 	*/
 	result, err := readAndParseFromCommandLine(osInfoCmd)
 	if err != nil {
@@ -196,45 +196,45 @@ func ProcessorID() (string, error) {
 
 func processorInfo() (string, []string, error) {
 	/*
-		Sample output of 'dmidecode --type processor'
+		  Sample output of 'dmidecode --type processor'
 
-		Processor Information
-				Socket Designation: CPU1
-				Type: Central Processor
-				Family: Xeon
-				Manufacturer: Intel(R) Corporation
-				ID: C2 06 02 00 FF FB EB BF
-				Signature: Type 0, Family 6, Model 44, Stepping 2
-				Flags:
-						FPU (Floating-point unit on-chip)
-						VME (Virtual mode extension)
-						DE (Debugging extension)
-						PSE (Page size extension)
-						TSC (Time stamp counter)
-						...
-				Version: Intel(R) Xeon(R) Gold 6140 CPU @ 2.30GHz
-				Voltage: 1.6 V
-				External Clock: 100 MHz
-				Max Speed: 4000 MHz
-				Current Speed: 2300 MHz
-				Status: Populated, Enabled
-				Upgrade: Socket LGA3647-1
-				L1 Cache Handle: 0x000E
-				L2 Cache Handle: 0x000F
-				L3 Cache Handle: 0x0010
-				Serial Number: Not Specified
-				Asset Tag: UNKNOWN
-				Part Number: Not Specified
-				Core Count: 18
-				Core Enabled: 18
-				Thread Count: 36
-				Characteristics:
-						64-bit capable
-				        Multi-Core
-				        Hardware Thread
-				        Execute Protection
-				        Enhanced Virtualization
-				        Power/Performance Control
+		  Processor Information
+				  Socket Designation: CPU1
+				  Type: Central Processor
+				  Family: Xeon
+				  Manufacturer: Intel(R) Corporation
+				  ID: C2 06 02 00 FF FB EB BF
+				  Signature: Type 0, Family 6, Model 44, Stepping 2
+				  Flags:
+						  FPU (Floating-point unit on-chip)
+						  VME (Virtual mode extension)
+						  DE (Debugging extension)
+						  PSE (Page size extension)
+						  TSC (Time stamp counter)
+						  ...
+				  Version: Intel(R) Xeon(R) Gold 6140 CPU @ 2.30GHz
+				  Voltage: 1.6 V
+				  External Clock: 100 MHz
+				  Max Speed: 4000 MHz
+				  Current Speed: 2300 MHz
+				  Status: Populated, Enabled
+				  Upgrade: Socket LGA3647-1
+				  L1 Cache Handle: 0x000E
+				  L2 Cache Handle: 0x000F
+				  L3 Cache Handle: 0x0010
+				  Serial Number: Not Specified
+				  Asset Tag: UNKNOWN
+				  Part Number: Not Specified
+				  Core Count: 18
+				  Core Enabled: 18
+				  Thread Count: 36
+				  Characteristics:
+						  64-bit capable
+						  Multi-Core
+						  Hardware Thread
+						  Execute Protection
+						  Enhanced Virtualization
+						  Power/Performance Control
 	*/
 	result, err := readAndParseFromCommandLine(processorInfoCmd)
 	if err != nil {
@@ -275,9 +275,9 @@ func VMMVersion() (string, error) {
 func vmmInfo() (string, string, error) {
 	// Check if docker is installed
 	/*
-		Sample response of 'dockerd -v'
+	  Sample response of 'dockerd -v'
 
-		Docker version 19.03.5, build 633a0ea
+	  Docker version 19.03.5, build 633a0ea
 	*/
 	result, err := readAndParseFromCommandLine(dockerVersionCmd)
 
@@ -460,42 +460,67 @@ func GetCBNTProfile(cbntBits uint64) (string, error) {
 	return "", fmt.Errorf("platforminfo:GetCBNTProfile(): Could not determine CBNT profile with flags %x", cbntProfileFlags)
 }
 
-// If CBNT is enabled, create a valid "CBNT" pointer/structure.  Otherwise
-// return a nil pointer (i.e. CBNT is not enabled).
-func GetCBNTHardwareFeature() (*CBNT, error) {
+// If CBNT is supported and enabled, create a valid "CBNT" structure.  Otherwise
+// return a empty structure (i.e. CBNT is not enabled).
+func GetCBNTHardwareFeature() (CBNT, error) {
+
+	var cbnt CBNT
 
 	cbntBits, err := ReadMSR(CBNT_MSR_OFFSET)
 	if err != nil {
-		return nil, err
+		return cbnt, err
 	}
 
-	// check if CBNT is enabled
+	// Check if CBNT is supported
 	// similar to 'rdmsr -f 32:32 0x13A
-	cbntEnabled, err := GetBits(cbntBits, 32, 32)
+	cbntSupported, err := GetBits(cbntBits, 32, 32)
 	if err != nil {
-		return nil, err
+		return cbnt, err
 	}
 
-	// CBNT is enabled, create a CBNT structure and populate it.
-	if cbntEnabled == 1 {
-		cbnt := CBNT{}
-		cbnt.Meta.Profile, err = GetCBNTProfile(cbntBits)
+	// CBNT is supported, create a CBNT structure and populate it.
+	if cbntSupported == 1 {
+		cbnt.HardwareFeature.Supported = true
+
+		// Verify if cbnt is enabled
+		// MSR[7:4] denotes the value of (Verify/Measure/FACB)
+		bitsVMF, err := GetBits(cbntBits, 7, 4)
 		if err != nil {
-			return nil, err
+			return cbnt, err
 		}
-		cbnt.Enabled = cbnt.Meta.Profile != CBNT_PROFILE_0
-		cbnt.Meta.MSR = CBNT_PROCESSOR_FLAGS
-		cbnt.Meta.ForceBit = true
 
-		return &cbnt, nil
+		// MSR[0] denotes the value of (BTG enabled and passed startup ACM)
+		bitBTGEnabled, err := GetBits(cbntBits, 0, 0)
+		if err != nil {
+			return cbnt, err
+		}
+
+		if bitsVMF != 0 || bitBTGEnabled != 0 {
+			cbnt.Meta.Profile, err = GetCBNTProfile(cbntBits)
+			if err != nil {
+				return cbnt, err
+			}
+			cbnt.Enabled = cbnt.Meta.Profile != CBNT_PROFILE_0
+			cbnt.Meta.MSR = CBNT_PROCESSOR_FLAGS
+		}
 	}
 
-	return nil, nil
+	return cbnt, nil
 }
 
-// If Secure Boot is eabled, create a "HardwareFeature" pointer/structure.  Otherwise,
-// return nil (.e. SUEFI is not enabled).
-func GetSUEFIHardwareFeature() (*HardwareFeature, error) {
+// If the current boot is in UEFI mode and Secure Boot is enabled, create a valid "UEFI" structure with "SecureBootEnabled" meta section.
+// Otherwise, return empty structure (i.e. Current boot is not UEFI and secure boot is not enabled).
+func GetUEFIHardwareFeature() (UEFI, error) {
+
+	var uefi UEFI
+	//Checking the presence of efi directory to make sure the current boot is in UEFI mode.
+	//In case of legacy mode this directory wont be available.
+	if _, err := os.Stat("/sys/firmware/efi"); os.IsNotExist(err) {
+		return uefi, nil
+	} else {
+		uefi.HardwareFeature.Enabled = true
+		uefi.HardwareFeature.Supported = true
+	}
 
 	// call 'bootctl status'. Ignore errors because 'bootctl' can return '1'
 	// even when valid output is present onstdout.  Just see if stdout contains
@@ -503,10 +528,8 @@ func GetSUEFIHardwareFeature() (*HardwareFeature, error) {
 	cmd := exec.Command(suefiBootCtlCmd[0], suefiBootCtlCmd[1])
 	stdout, _ := cmd.Output()
 	if strings.Contains(string(stdout), SECURE_BOOT_ENABLED) {
-		suefi := HardwareFeature{}
-		suefi.Enabled = true
-		return &suefi, nil
+		uefi.Meta.SecureBootEnabled = true
 	}
 
-	return nil, nil
+	return uefi, nil
 }

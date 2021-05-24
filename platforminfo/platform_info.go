@@ -7,16 +7,17 @@
 package platforminfo
 
 import (
-	"github.com/pkg/errors"
 	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/intel-secl/intel-secl/v3/pkg/lib/common/utils"
+	"github.com/pkg/errors"
 )
 
 const (
-	Wlagent = "wlagent"
+	BindingKeyCertificatePath = "/etc/workload-agent/bindingkey.pem"
+	WLAGENT                   = "wlagent"
 )
 
 // Struct used to hold the current host's platform information that can be encoded/decoded to
@@ -54,6 +55,7 @@ const (
 //             "enabled": true,
 //             "meta": {
 //                 "tpm_version": "2.0",
+//                 "pcr_banks": "SHA1_SHA256"
 //             }
 //         }
 //     },
@@ -70,7 +72,6 @@ const (
 //         "CBNT": {
 // 	            "enabled": true,
 // 	            "meta": {
-// 	                "force_bit": "true",
 // 	                "profile": "BTGP4",
 // 	                "msr": "mk ris kfm"
 // 	            }
@@ -82,12 +83,13 @@ const (
 //             "enabled": true,
 //             "meta": {
 //                 "tpm_version": "2.0",
+//                 "pcr_banks": "SHA1_SHA256"
 //             }
 //         }
 //    }, //
 //
 //------------------------------------------------------------------------------------------------
-// Secure Boot systems will contain the 'SUEFI' section in 'hardware_features'...
+// Secure Boot systems will contain the 'secure_boot_enabled' meta section under 'UEFI' section in 'hardware_features'...
 //------------------------------------------------------------------------------------------------
 //
 //    "hardware_features": {
@@ -97,26 +99,45 @@ const (
 // 	        "TPM": {
 // 	            "enabled": true,
 // 	            "meta": {
-// 	                "tpm_version": "2.0"
+// 	                "tpm_version": "2.0",
+// 	                "pcr_banks": "SHA1_SHA256"
 // 	            }
 // 	        },
-// 	        "SUEFI": {
-// 	            "enabled": true
-// 	        }
+// 	        "UEFI": {
+//		    "enabled": "true",
+//		    "meta": {
+//			"secure_boot_enabled": false
+//		    }
+//		},
 //     },
 //
 
+type HardwareFeature struct {
+	Supported bool `json:"supported,string"`
+	Enabled   bool `json:"enabled,string"`
+}
+
 type CBNT struct {
-	Enabled bool `json:"enabled,string"`
-	Meta    struct {
-		ForceBit bool   `json:"force_bit,string"`
-		Profile  string `json:"profile"`
-		MSR      string `json:"msr"`
+	HardwareFeature
+	Meta struct {
+		Profile string `json:"profile"`
+		MSR     string `json:"msr"`
 	} `json:"meta"`
 }
 
-type HardwareFeature struct {
-	Enabled bool `json:"enabled,string"`
+type TPM struct {
+	HardwareFeature
+	Meta struct {
+		TPMVersion string `json:"tpm_version"`
+		PCRBanks   string `json:"pcr_banks"`
+	} `json:"meta"`
+}
+
+type UEFI struct {
+	HardwareFeature
+	Meta struct {
+		SecureBootEnabled bool `json:"secure_boot_enabled"`
+	} `json:"meta"`
 }
 
 type PlatformInfo struct {
@@ -138,15 +159,12 @@ type PlatformInfo struct {
 	TbootInstalled      bool   `json:"tboot_installed,string"`
 	IsDockerEnvironment bool   `json:"is_docker_env,string"`
 	HardwareFeatures    struct {
-		TXT HardwareFeature `json:"TXT"`
-		TPM struct {
-			Enabled bool `json:"enabled,string"`
-			Meta    struct {
-				TPMVersion string `json:"tpm_version"`
-			} `json:"meta"`
-		} `json:"TPM"`
-		CBNT  *CBNT            `json:"CBNT,omitempty"`
-		SUEFI *HardwareFeature `json:"SUEFI,omitempty"`
+		TXT  HardwareFeature `json:"TXT"`
+		TPM  TPM             `json:"TPM"`
+		CBNT CBNT            `json:"CBNT"`
+		UEFI UEFI            `json:"UEFI"`
+		PFR  HardwareFeature `json:"PFR"`
+		BMC  HardwareFeature `json:"BMC"`
 	} `json:"hardware_features"`
 	InstalledComponents []string `json:"installed_components"`
 }
@@ -234,7 +252,9 @@ func GetPlatformInfo() (*PlatformInfo, error) {
 
 	platformInfo.IsDockerEnvironment = utils.IsContainerEnv()
 	platformInfo.HardwareFeatures.TXT.Enabled = platformInfo.TXTEnabled
+	platformInfo.HardwareFeatures.TXT.Supported = platformInfo.TXTEnabled
 	platformInfo.HardwareFeatures.TPM.Enabled = platformInfo.TPMEnabled
+	platformInfo.HardwareFeatures.TPM.Supported = platformInfo.TPMEnabled
 	platformInfo.HardwareFeatures.TPM.Meta.TPMVersion = platformInfo.TPMVersion
 	platformInfo.InstalledComponents = []string{"tagent"}
 
@@ -243,13 +263,13 @@ func GetPlatformInfo() (*PlatformInfo, error) {
 		err = errors.Wrap(err, "Error getting CBNT information")
 	}
 
-	platformInfo.HardwareFeatures.SUEFI, rerr = GetSUEFIHardwareFeature()
-	if rerr != nil {
-		err = errors.Wrap(err, "Error getting SUEFI information")
+	platformInfo.HardwareFeatures.UEFI, err = GetUEFIHardwareFeature()
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error getting UEFI information")
 	}
 
 	if WLAIsInstalled() {
-		platformInfo.InstalledComponents = append(platformInfo.InstalledComponents, Wlagent)
+		platformInfo.InstalledComponents = append(platformInfo.InstalledComponents, WLAGENT)
 	}
 
 	if err != nil {
@@ -269,7 +289,7 @@ func fileExists(filename string) bool {
 
 // Run 'which wlagent'.  If the command returns '0' (no error) then workload-agent is installed.
 func WLAIsInstalled() bool {
-	cmd := exec.Command("which", Wlagent)
+	cmd := exec.Command("which", WLAGENT)
 
 	err := cmd.Run()
 	if err != nil {
