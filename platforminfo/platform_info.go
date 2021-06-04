@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/pkg/errors"
 	"github.com/intel-secl/intel-secl/v4/pkg/lib/common/utils"
 )
 
